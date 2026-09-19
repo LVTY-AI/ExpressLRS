@@ -7,6 +7,8 @@
 #if defined(CRSF_TX_MODULE) && !defined(UNIT_TEST)
 #include "device.h"
 
+void sendTimeToBackpack(const uint8_t *timeData);
+
 #if defined(PLATFORM_ESP32)
 #include <hal/uart_ll.h>
 #include <soc/soc.h>
@@ -348,6 +350,15 @@ bool CRSFHandset::processInternalCrsfPackage(uint8_t *package)
         }
         else
         {
+            if (packetType == CRSF_FRAMETYPE_PARAMETER_WRITE
+                && header->payload[0] == 0x3C
+                && header->frame_size >= 11)
+            {
+                // EdgeTX's hidden time-sync parameter is {year-1900, month 0-11,
+                // day, hour, minute, second}; forward it to the TX backpack.
+                sendTimeToBackpack(&header->payload[1]);
+                return true;
+            }
             if (RecvParameterUpdate) RecvParameterUpdate(packetType, header->payload[0], header->payload[1]);
         }
 
