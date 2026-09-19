@@ -3,6 +3,7 @@
     #include "ardupilot_protocol.h"
 #endif
 #include <algorithm>
+#include <ctime>
 
 void convert_mavlink_to_crsf_telem(uint8_t *CRSFinBuffer, uint8_t count, Handset *handset)
 {
@@ -74,6 +75,31 @@ void convert_mavlink_to_crsf_telem(uint8_t *CRSFinBuffer, uint8_t count, Handset
                 crsfgps.p.satellites_in_use = gps_int.satellites_visible;
                 CRSF::SetHeaderAndCrc((uint8_t *)&crsfgps, CRSF_FRAMETYPE_GPS, CRSF_FRAME_SIZE(sizeof(crsf_sensor_gps_t)), CRSF_ADDRESS_CRSF_TRANSMITTER);
                 handset->sendTelemetryToTX((uint8_t *)&crsfgps);
+                break;
+            }
+            case MAVLINK_MSG_ID_SYSTEM_TIME: {
+                mavlink_system_time_t system_time;
+                mavlink_msg_system_time_decode(&msg, &system_time);
+                // SYSTEM_TIME is zero until the flight controller has a valid RTC source.
+                if (system_time.time_unix_usec == 0) {
+                    break;
+                }
+                time_t time_unix = (time_t)(system_time.time_unix_usec / 1000000);
+                struct tm *time_info = gmtime(&time_unix);
+                if (time_info == nullptr) {
+                    break;
+                }
+                CRSF_MK_FRAME_T(crsf_sensor_gps_time_t)
+                crsftime = {0};
+                crsftime.p.year = htobe16(time_info->tm_year + 1900);
+                crsftime.p.month = time_info->tm_mon + 1;
+                crsftime.p.day = time_info->tm_mday;
+                crsftime.p.hour = time_info->tm_hour;
+                crsftime.p.minute = time_info->tm_min;
+                crsftime.p.second = time_info->tm_sec;
+                crsftime.p.millisecond = 0;
+                CRSF::SetHeaderAndCrc((uint8_t *)&crsftime, CRSF_FRAMETYPE_GPS_TIME, CRSF_FRAME_SIZE(sizeof(crsf_sensor_gps_time_t)), CRSF_ADDRESS_CRSF_TRANSMITTER);
+                handset->sendTelemetryToTX((uint8_t *)&crsftime);
                 break;
             }
             case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
