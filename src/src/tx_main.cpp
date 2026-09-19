@@ -16,13 +16,14 @@
 #include "devButton.h"
 #include "devVTX.h"
 #if defined(PLATFORM_ESP32)
-#include "devScreen.h"
 #include "devBLE.h"
+#include "devBackpack.h"
+#if !defined(PLATFORM_ESP32_C3)
+#include "devScreen.h"
 #include "devGsensor.h"
 #include "devThermal.h"
 #include "devPDET.h"
-#include "devBackpack.h"
-#include "VideoReceiverEndpoint.h"
+#endif
 #else
 // Fake functions for 8285
 void checkBackpackUpdate() {}
@@ -45,7 +46,6 @@ void sendMAVLinkTelemetryToBackpack(uint8_t *) {}
 
 /// define some libs to use ///
 MSP msp;
-ELRS_EEPROM eeprom;
 TxConfig config;
 Stream *TxUSB;
 
@@ -110,8 +110,8 @@ device_affinity_t ui_devices[] = {
   {&WIFI_device, 0},
   {&Button_device, 0},
 #if defined(PLATFORM_ESP32)
-  {&Backpack_device, 0},
   {&BLE_device, 0},
+  {&Backpack_device, 0},
 #if !defined(PLATFORM_ESP32_C3)
   {&Screen_device, 0},
   {&Gsensor_device, 0},
@@ -448,7 +448,7 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
   OtaSwitchMode_e newSwitchMode = (OtaSwitchMode_e)config.GetSwitchMode();
 
   bool subGHz = FHSSconfig->freq_center < 1000000000;
-#if defined(RADIO_LR1121)
+#if defined(RADIO_LR1121) || defined(RADIO_LR2021)
   if (FHSSuseDualBand && subGHz)
   {
       subGHz = FHSSconfigDualBand->freq_center < 1000000000;
@@ -469,7 +469,7 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
 #endif
   hwTimer::updateInterval(interval);
 
-#if defined(RADIO_LR1121)
+#if defined(RADIO_LR1121) || defined(RADIO_LR2021)
   FHSSusePrimaryFreqBand = !RadioBandMod::isB2G4(ModParams->radio_type);
   FHSSuseDualBand = RadioBandMod::isBDUAL(ModParams->radio_type);
 #endif
@@ -478,18 +478,24 @@ void SetRFLinkRate(uint8_t index) // Set speed of RF link
                ModParams->PreambleLen, invertIQ, ModParams->PayloadLength
 #if defined(RADIO_SX128X)
                , OtaGetUidSeed(), OtaCrcInitializer, ModParams->radio_type
-#endif
-#if defined(RADIO_LR1121)
+#elif defined(RADIO_LR1121) || defined(RADIO_LR2021)
                , ModParams->radio_type, (uint8_t)UID[5], (uint8_t)UID[4]
+#if defined(RADIO_LR2021)
+               ,OtaGetUidSeed(), OtaCrcInitializer
+#endif
 #endif
                );
 
-#if defined(RADIO_LR1121)
+#if defined(RADIO_LR1121) || defined(RADIO_LR2021)
   if (FHSSuseDualBand)
   {
     Radio.Config(ModParams->bw2, ModParams->sf2, ModParams->cr2, FHSSgetInitialGeminiFreq(),
                 ModParams->PreambleLen2, invertIQ, ModParams->PayloadLength,
-                ModParams->radio_type, (uint8_t)UID[5], (uint8_t)UID[4], SX12XX_Radio_2);
+                ModParams->radio_type, (uint8_t)UID[5], (uint8_t)UID[4],
+#if defined(RADIO_LR2021)
+                OtaGetUidSeed(), OtaCrcInitializer,
+#endif
+                SX12XX_Radio_2);
   }
 #endif
 
@@ -1212,7 +1218,7 @@ static void setupSerial()
   }
   else if (GPIO_PIN_DEBUG_RX != UNDEF_PIN && GPIO_PIN_DEBUG_TX != UNDEF_PIN)
   {
-    serialPort = new HardwareSerial(2);
+    serialPort = new HardwareSerial(1);
     ((HardwareSerial *)serialPort)->begin(BACKPACK_LOGGING_BAUD, SERIAL_8N1, GPIO_PIN_DEBUG_RX, GPIO_PIN_DEBUG_TX);
   }
   else
@@ -1411,8 +1417,6 @@ void setup()
 
     handset->registerCallbacks(UARTconnected, firmwareOptions.is_airport ? nullptr : UARTdisconnected);
 
-    eeprom.Begin(); // Init the eeprom
-    config.SetStorageProvider(&eeprom); // Pass pointer to the Config class for access to storage
     config.Load(); // Load the stored values from eeprom
 
     Radio.currFreq = FHSSgetInitialFreq(); //set frequency first or an error will occur!!!
@@ -1425,7 +1429,16 @@ void setup()
     #else
     if (GPIO_PIN_SCK != UNDEF_PIN)
     {
-      init_success = Radio.Begin(FHSSgetMinimumFreq(), FHSSgetMaximumFreq());
+#if defined(RADIO_SX127X)
+        //Radio.currSyncWord = UID[3];
+        init_success = Radio.Begin();
+#elif defined(RADIO_SX128X)
+        init_success = Radio.Begin();
+#elif defined(RADIO_LR1121)
+        init_success = Radio.Begin(FHSSgetMinimumFreq(), FHSSgetMaximumFreq());
+#elif defined(RADIO_LR2021)
+        init_success = Radio.Begin(FHSSconfig->freq_center, FHSSconfigDualBand->freq_center);
+#endif
     }
     else
     {
@@ -1559,7 +1572,7 @@ void loop()
   // only send Uplink data when binding is not active
   if (InBindingMode)
   {
-#if defined(RADIO_LR1121)
+#if defined(RADIO_LR1121) || defined(RADIO_LR2021)
     // Send half of the bind packets on the 2.4GHz domain
     if (BindingSendCount == BindingSpamAmount / 2) {
       SetRFLinkRate(enumRatetoIndexSafe(RATE_DUALBAND_BINDING));
