@@ -40,6 +40,7 @@ public:
     bool GetCrsfBaroSensorDetected() const { return crsfBaroSensorDetected; }
     uint8_t GetUpdatedModelMatch() const { return modelMatchId; }
     bool GetNextPayload(uint8_t* nextPayloadSize, uint8_t *payloadData);
+    uint32_t GetGpsTimeEnqueuedMs() const { return gpsTimeEnqueuedMs; }
     int UpdatedPayloadCount();
     void AppendTelemetryPackage(uint8_t *package);
     uint8_t GetFifoFullPct() { return (TELEMETRY_FIFO_SIZE - messagePayloads.free()) * 100 / TELEMETRY_FIFO_SIZE; }
@@ -54,6 +55,7 @@ private:
     telemetry_state_s telemetry_state;
     uint8_t currentTelemetryByte;
     uint8_t prioritizedCount;
+    uint32_t gpsTimeEnqueuedMs;
     bool callBootloader;
     bool callEnterBind;
     bool callUpdateModelMatch;

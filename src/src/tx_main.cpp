@@ -1,4 +1,5 @@
 #include "rxtx_common.h"
+#include "CRSFGpsTime.h"
 
 #include "CRSFHandset.h"
 #include "dynpower.h"
@@ -95,6 +96,7 @@ static TxTlmRcvPhase_e TelemetryRcvPhase = ttrpTransmitting;
 StubbornReceiver TelemetryReceiver;
 StubbornSender MspSender;
 uint8_t CRSFinBuffer[CRSF_MAX_PACKET_LEN+1];
+static uint32_t gpsTimeFirstChunkMs = 0;
 
 device_affinity_t ui_devices[] = {
   {&Handset_device, 1},
@@ -244,7 +246,12 @@ bool ICACHE_RAM_ATTR ProcessTLMpacket(SX12xxDriverCommon::rx_status const status
       dataLen = sizeof(ota8->tlm_dl.payload);
     }
     //DBGLN("pi=%u len=%u", ota8->tlm_dl.packageIndex, dataLen);
-    TelemetryReceiver.ReceiveData(ota8->tlm_dl.packageIndex & ELRS8_TELEMETRY_MAX_PACKAGES, telemPtr, dataLen);
+    const uint8_t packageIndex = ota8->tlm_dl.packageIndex & ELRS8_TELEMETRY_MAX_PACKAGES;
+    TelemetryReceiver.ReceiveData(packageIndex, telemPtr, dataLen);
+    if (packageIndex == 1 && dataLen > CRSF_TELEMETRY_TYPE_INDEX && telemPtr[CRSF_TELEMETRY_TYPE_INDEX] == CRSF_FRAMETYPE_GPS_TIME)
+    {
+      gpsTimeFirstChunkMs = millis();
+    }
   }
   // Std res mode
   else
@@ -261,9 +268,14 @@ bool ICACHE_RAM_ATTR ProcessTLMpacket(SX12xxDriverCommon::rx_status const status
           OtaUnpackAirportData(otaPktPtr, &apOutputBuffer);
           return true;
         }
-        TelemetryReceiver.ReceiveData(otaPktPtr->std.tlm_dl.packageIndex & ELRS4_TELEMETRY_MAX_PACKAGES,
+        const uint8_t packageIndex = otaPktPtr->std.tlm_dl.packageIndex & ELRS4_TELEMETRY_MAX_PACKAGES;
+        TelemetryReceiver.ReceiveData(packageIndex,
           otaPktPtr->std.tlm_dl.payload,
           sizeof(otaPktPtr->std.tlm_dl.payload));
+        if (packageIndex == 1 && sizeof(otaPktPtr->std.tlm_dl.payload) > CRSF_TELEMETRY_TYPE_INDEX && otaPktPtr->std.tlm_dl.payload[CRSF_TELEMETRY_TYPE_INDEX] == CRSF_FRAMETYPE_GPS_TIME)
+        {
+          gpsTimeFirstChunkMs = millis();
+        }
         break;
     }
   }
@@ -1571,6 +1583,14 @@ void loop()
       }
       else
       {
+        if (CRSFinBuffer[CRSF_TELEMETRY_TYPE_INDEX] == CRSF_FRAMETYPE_GPS_TIME && gpsTimeFirstChunkMs != 0)
+        {
+          const uint16_t otaMs = (uint16_t)(millis() - gpsTimeFirstChunkMs)
+                                 + (ExpressLRS_currAirRate_RFperfParams->TOA + 500) / 1000;
+          crsfGpsTimeAdvanceMs(CRSFinBuffer, otaMs);
+          crsfRecalcCrc(CRSFinBuffer);
+          gpsTimeFirstChunkMs = 0;
+        }
         // Send all other tlm to handset
         handset->sendTelemetryToTX(CRSFinBuffer);
         sendCRSFTelemetryToBackpack(CRSFinBuffer);

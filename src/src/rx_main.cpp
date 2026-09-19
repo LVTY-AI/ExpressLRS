@@ -1,4 +1,5 @@
 #include "rxtx_common.h"
+#include "CRSFGpsTime.h"
 #include "LowPassFilter.h"
 
 #include "crc.h"
@@ -2237,6 +2238,11 @@ void loop()
     uint8_t nextPlayloadSize = 0;
     if (!TelemetrySender.IsActive() && telemetry.GetNextPayload(&nextPlayloadSize, currentTelemetryPayload))
     {
+        if (currentTelemetryPayload[CRSF_TELEMETRY_TYPE_INDEX] == CRSF_FRAMETYPE_GPS_TIME && telemetry.GetGpsTimeEnqueuedMs() != 0)
+        {
+            crsfGpsTimeAdvanceMs(currentTelemetryPayload, (uint16_t)(millis() - telemetry.GetGpsTimeEnqueuedMs()));
+            crsfRecalcCrc(currentTelemetryPayload);
+        }
         TelemetrySender.SetDataToTransmit(currentTelemetryPayload, nextPlayloadSize);
     }
 

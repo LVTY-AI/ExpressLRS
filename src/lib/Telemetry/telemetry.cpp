@@ -149,6 +149,7 @@ void Telemetry::ResetState()
     telemetry_state = TELEMETRY_IDLE;
     currentTelemetryByte = 0;
     prioritizedCount = 0;
+    gpsTimeEnqueuedMs = 0;
     messagePayloads.flush();
 }
 
@@ -262,6 +263,10 @@ bool Telemetry::processInternalTelemetryPackage(uint8_t *package)
 void Telemetry::AppendTelemetryPackage(uint8_t *package)
 {
     const crsf_header_t *header = (crsf_header_t *) package;
+    if (header->type == CRSF_FRAMETYPE_GPS_TIME)
+    {
+        gpsTimeEnqueuedMs = millis();
+    }
     if (header->type == CRSF_FRAMETYPE_HEARTBEAT || processInternalTelemetryPackage(package))
     {
         return;
