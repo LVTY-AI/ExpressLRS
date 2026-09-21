@@ -16,8 +16,14 @@ void BackpackConnector::forwardMessage(const crsf_header_t *message)
         return;
     }
     const auto extMessage = (crsf_ext_header_t *)message;
-    if (extMessage->dest_addr != CRSF_ADDRESS_VIDEO_RECEIVER || config.GetBackpackDisable())
+    if (extMessage->dest_addr != CRSF_ADDRESS_VIDEO_RECEIVER)
     {
+        return;
+    }
+    if (config.GetBackpackDisable()
+        || ((const uint8_t *)message)[CRSF_MSP_STATUS_BYTE_OFFSET] & bit(7))
+    {
+        crsf2msp.reset();
         return;
     }
 
