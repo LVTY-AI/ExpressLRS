@@ -7,7 +7,9 @@
 #if defined(CRSF_TX_MODULE) && !defined(UNIT_TEST)
 #include "device.h"
 
-void sendTimeToBackpack(const uint8_t *timeData);
+#if defined(PLATFORM_ESP32)
+void forwardVideoReceiverMspToBackpack(const uint8_t *message);
+#endif
 
 #if defined(PLATFORM_ESP32)
 #include <hal/uart_ll.h>
@@ -348,19 +350,7 @@ bool CRSFHandset::processInternalCrsfPackage(uint8_t *package)
             #endif
             if (RecvModelUpdate) RecvModelUpdate();
         }
-        else
-        {
-            if (packetType == CRSF_FRAMETYPE_PARAMETER_WRITE
-                && header->payload[0] == 0x3C
-                && header->frame_size >= 11)
-            {
-                // EdgeTX's hidden time-sync parameter is {year-1900, month 0-11,
-                // day, hour, minute, second}; forward it to the TX backpack.
-                sendTimeToBackpack(&header->payload[1]);
-                return true;
-            }
-            if (RecvParameterUpdate) RecvParameterUpdate(packetType, header->payload[0], header->payload[1]);
-        }
+        else if (RecvParameterUpdate) RecvParameterUpdate(packetType, header->payload[0], header->payload[1]);
 
         return true;
     }
@@ -390,6 +380,15 @@ bool CRSFHandset::ProcessPacket()
         RcPacketToChannelsData();
         packetReceived = true;
     }
+#if defined(PLATFORM_ESP32)
+    // route addressed video-receiver MSP directly to the TX backpack
+    else if ((packetType == CRSF_FRAMETYPE_MSP_REQ || packetType == CRSF_FRAMETYPE_MSP_WRITE)
+            && SerialInBuffer[3] == CRSF_ADDRESS_VIDEO_RECEIVER)
+    {
+        forwardVideoReceiverMspToBackpack(SerialInBuffer);
+        packetReceived = true;
+    }
+#endif
     // check for all extended frames that are a broadcast or a message to the FC
     else if (packetType >= CRSF_FRAMETYPE_DEVICE_PING &&
             (SerialInBuffer[3] == CRSF_ADDRESS_FLIGHT_CONTROLLER || SerialInBuffer[3] == CRSF_ADDRESS_BROADCAST || SerialInBuffer[3] == CRSF_ADDRESS_CRSF_RECEIVER))

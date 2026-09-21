@@ -1,4 +1,5 @@
 #include "crsf2msp.h"
+#include "crsf_protocol.h"
 
 extern GENERIC_CRC8 crsf_crc; // defined in crsf.cpp reused here
 
@@ -17,7 +18,28 @@ void CROSSFIRE2MSP::reset()
 
 void CROSSFIRE2MSP::parse(const uint8_t *data)
 {
-    uint8_t CRSFpayloadLen = data[CRSF_FRAME_PAYLOAD_LEN_IDX] - CRSF_EXT_FRAME_PAYLOAD_LEN_SIZE_OFFSET;
+    if (data == nullptr)
+    {
+        reset();
+        return;
+    }
+
+    if (data[CRSF_MSP_TYPE_IDX] != CRSF_FRAMETYPE_MSP_REQ
+        && data[CRSF_MSP_TYPE_IDX] != CRSF_FRAMETYPE_MSP_RESP
+        && data[CRSF_MSP_TYPE_IDX] != CRSF_FRAMETYPE_MSP_WRITE)
+    {
+        reset();
+        return;
+    }
+
+    const uint8_t crsfFrameSize = data[CRSF_FRAME_PAYLOAD_LEN_IDX];
+    if (crsfFrameSize <= CRSF_EXT_FRAME_PAYLOAD_LEN_SIZE_OFFSET || crsfFrameSize > CRSF_PAYLOAD_SIZE_MAX)
+    {
+        reset();
+        return;
+    }
+
+    const uint8_t CRSFpayloadLen = crsfFrameSize - CRSF_EXT_FRAME_PAYLOAD_LEN_SIZE_OFFSET;
     bool error = isError(data);
     bool newFrame = isNewFrame(data);
 
@@ -35,16 +57,37 @@ void CROSSFIRE2MSP::parse(const uint8_t *data)
         return;
     }
 
+    if (!newFrame && (MSPvers == MSP_FRAME_UNKNOWN || frameComplete))
+    {
+        reset();
+        return;
+    }
+
     if (newFrame) // If it's a new frame then out a header on first
     {
         idx = 3; // skip the header start wiring at offset 3.
+        frameComplete = false;
         MSPvers = getVersion(data);
+        const uint8_t minimumFrameSize = MSPvers == MSP_FRAME_V2 ? 10
+            : MSPvers == MSP_FRAME_V1_JUMBO ? 9
+            : MSPvers == MSP_FRAME_V1 ? 7
+            : 0;
+        if (minimumFrameSize == 0 || crsfFrameSize < minimumFrameSize)
+        {
+            reset();
+            return;
+        }
         src = data[CRSF_MSP_SRC_OFFSET];
         dest = data[CRSF_MSP_DEST_OFFSET];
         outBuffer[0] = '$';
         outBuffer[1] = (MSPvers == MSP_FRAME_V1 || MSPvers == MSP_FRAME_V1_JUMBO) ? 'M' : 'X';
         outBuffer[2] = error ? '!' : getHeaderDir(data);
         pktLen = getFrameLen(data, MSPvers);
+        if (pktLen > sizeof(outBuffer) - 4)
+        {
+            reset();
+            return;
+        }
     }
 
     // process the chunk of MSP frame
@@ -53,6 +96,11 @@ void CROSSFIRE2MSP::parse(const uint8_t *data)
     // the solution is to use the minimum of the two lengths
     uint32_t frameLen = pktLen - (idx - 3);
     uint32_t minLen = frameLen < CRSFpayloadLen ? frameLen : CRSFpayloadLen;
+    if (idx >= sizeof(outBuffer) || minLen > sizeof(outBuffer) - idx - 1)
+    {
+        reset();
+        return;
+    }
     memcpy(&outBuffer[idx], &data[CRSF_MSP_FRAME_OFFSET], minLen); // chunk of MSP data
     idx += minLen;
 
@@ -169,11 +217,11 @@ uint32_t CROSSFIRE2MSP::getFrameLen(const uint8_t *data, MSPframeType_e mspVersi
 uint8_t CROSSFIRE2MSP::getHeaderDir(const uint8_t *data)
 {
     const uint8_t statusByte = data[CRSF_MSP_TYPE_IDX];
-    if (statusByte == 0x7A)
+    if (statusByte == CRSF_FRAMETYPE_MSP_REQ || statusByte == CRSF_FRAMETYPE_MSP_WRITE)
     {
         return '<';
     }
-    else if (statusByte == 0x7B)
+    else if (statusByte == CRSF_FRAMETYPE_MSP_RESP)
     {
         return '>';
     }

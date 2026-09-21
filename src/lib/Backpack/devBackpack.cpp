@@ -6,6 +6,9 @@
 #include "msptypes.h"
 #include "CRSFHandset.h"
 #include "config.h"
+#if defined(PLATFORM_ESP32)
+#include "crsf2msp.h"
+#endif
 #include "logging.h"
 
 #define BACKPACK_TIMEOUT 20    // How often to check for backpack commands
@@ -289,24 +292,26 @@ void sendMAVLinkTelemetryToBackpack(uint8_t *data)
     TxBackpack->write(data + CRSF_FRAME_NOT_COUNTED_BYTES, count);
 }
 
-void sendTimeToBackpack(const uint8_t *timeData)
+#if defined(PLATFORM_ESP32)
+static CROSSFIRE2MSP videoReceiverMsp;
+
+void forwardVideoReceiverMspToBackpack(const uint8_t *message)
 {
-    if (config.GetBackpackDisable())
+    if (!OPT_USE_TX_BACKPACK || config.GetBackpackDisable())
     {
+        videoReceiverMsp.reset();
         return;
     }
 
-    mspPacket_t packet;
-    packet.reset();
-    packet.makeCommand();
-    packet.function = MSP_ELRS_BACKPACK_SET_RTC;
-    for (uint8_t i = 0; i < 6; ++i)
+    videoReceiverMsp.parse(message);
+    if (videoReceiverMsp.isFrameReady())
     {
-        packet.addByte(timeData[i]);
+        TxBackpack->write(videoReceiverMsp.getFrame(), videoReceiverMsp.getFrameLen());
+        videoReceiverMsp.FIFOout.flush();
+        videoReceiverMsp.reset();
     }
-
-    MSP::sendPacket(&packet, TxBackpack);
 }
+#endif
 
 void sendConfigToBackpack()
 {
