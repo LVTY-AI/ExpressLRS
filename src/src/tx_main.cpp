@@ -30,7 +30,6 @@ void checkBackpackUpdate() {}
 void feedUSB(const uint8_t *, const uint16_t) {}
 void sendCRSFTelemetryToBackpack(uint8_t *) {}
 void sendMAVLinkTelemetryToBackpack(uint8_t *) {}
-void sendTimeToBackpack(const uint8_t *) {}
 #endif
 
 #include "CRSFParser.h"
